@@ -4,7 +4,7 @@
 #include <memory>
 #include <map>
 
-// SimpleMemoryPools - version A.1.1.0
+// SimpleMemoryPools - version A.1.2.1
 namespace smp
 {
 	namespace literals
@@ -37,14 +37,6 @@ namespace smp
 		{
 			return std::size_t(size << 60);
 		}
-		constexpr std::size_t operator "" _ZiB(unsigned long long size)
-		{
-			return std::size_t(size << 70);
-		}
-		constexpr std::size_t operator "" _YiB(unsigned long long size)
-		{
-			return std::size_t(size << 80);
-		}
 	}
 
 	template <std::size_t Alignment>
@@ -62,10 +54,10 @@ namespace smp
 		template <class Type>
 		void operator()(Type * obj)
 		{
-			pool->destruct(obj);
+			pool.destroy(obj);
 		}
 
-		memorypool_alignas<Alignment> * pool;
+		memorypool_alignas<Alignment> & pool;
 	};
 
 	inline constexpr new_unique_ptr_t new_unique_ptr;
@@ -79,7 +71,7 @@ namespace smp
 		using deleter_type = delete_smart_ptr_t<Alignment>;
 
 		memorypool_alignas<Alignment>(std::size_t size) :
-			_memorypool_pools{{static_cast<std::byte *>(Alignment > __STDCPP_DEFAULT_NEW_ALIGNMENT__
+			_memorypool_pools{{static_cast<std::byte *>(Alignment > alignof(std::max_align_t)
 														? operator new(size, std::align_val_t(Alignment))
 														: operator new(size)),
 							   size}},
@@ -94,7 +86,7 @@ namespace smp
 		memorypool_alignas<Alignment> & operator=(memorypool_alignas<Alignment> &&) = delete;
 		~memorypool_alignas<Alignment>()
 		{
-			if constexpr (Alignment > __STDCPP_DEFAULT_NEW_ALIGNMENT__)
+			if constexpr (Alignment > alignof(std::max_align_t))
 			{
 				for (auto & pool : _memorypool_pools)
 				{
@@ -121,7 +113,7 @@ namespace smp
 				{
 					auto address = chunk->first + padding;
 
-					if (auto size = chunk->second - padding - sizeof(Type); size)
+					if (auto size = chunk->second - padding - sizeof(Type))
 					{
 						_memorypool_chunks.emplace_hint(std::next(chunk), address + sizeof(Type), size);
 					}
@@ -137,25 +129,25 @@ namespace smp
 		template <class Type, class ... ArgTypes>
 		std::unique_ptr<Type, deleter_type> construct(new_unique_ptr_t, ArgTypes && ... args)
 		{
-			if (auto ptr = construct<Type>(std::forward<ArgTypes>(args) ...); ptr)
+			if (auto ptr = construct<Type>(std::forward<ArgTypes>(args) ...))
 			{
-				return std::unique_ptr<Type, deleter_type>(ptr, deleter_type{this});
+				return std::unique_ptr<Type, deleter_type>(ptr, deleter_type{*this});
 			}
 
-			return nullptr;
+			return std::unique_ptr<Type, deleter_type>(nullptr, deleter_type{*this});
 		}
 		template <class Type, class ... ArgTypes>
 		std::shared_ptr<Type> construct(new_shared_ptr_t, ArgTypes && ... args)
 		{
-			if (auto ptr = construct<Type>(std::forward<ArgTypes>(args) ...); ptr)
+			if (auto ptr = construct<Type>(std::forward<ArgTypes>(args) ...))
 			{
-				return std::shared_ptr<Type>(ptr, deleter_type{this});
+				return std::shared_ptr<Type>(ptr, deleter_type{*this});
 			}
 
-			return nullptr;
+			return std::shared_ptr<Type>(nullptr);
 		}
 		template <class Type>
-		void destruct(Type * obj)
+		void destroy(Type * obj)
 		{
 			for (auto & pool : _memorypool_pools)
 			{
@@ -201,7 +193,7 @@ namespace smp
 		std::map<std::byte *, std::size_t> _memorypool_chunks;
 	};
 
-	using memorypool = memorypool_alignas<__STDCPP_DEFAULT_NEW_ALIGNMENT__>;
+	using memorypool = memorypool_alignas<alignof(std::max_align_t)>;
 }
 
 #endif
