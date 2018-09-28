@@ -11,11 +11,11 @@ int main()
 {
 	using namespace smp::literals;
 	
-	smp::memorypool											mp(64_B); // Parameter may be omitted
+	smp::memorypool	mp(64_B); // Parameter may be omitted
 	
-	S * a													= mp.construct<S>(1);
-	std::unique_ptr<S, smp::memorypool<>::deleter_type> b	= mp.construct_unique<S>(2);
-	std::shared_ptr<S> c									= mp.construct_shared<S>(3);
+	S * a = mp.construct<S>(1);
+	std::unique_ptr<S, smp::memorypool<>::deleter_type> b = mp.construct_unique<S>(2);
+	std::shared_ptr<S> c = mp.construct_shared<S>(3);
 	
 	{
 		auto d = c;
