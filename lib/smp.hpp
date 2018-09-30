@@ -4,7 +4,7 @@
 #include <memory>
 #include <map>
 
-// SimpleMemoryPools - version A.1.3.1
+// SimpleMemoryPools - version A.1.3.2
 namespace smp
 {
 	namespace literals
@@ -35,8 +35,8 @@ namespace smp
 		template <size_t Alignment>
 		struct _smart_ptr_deleter_t
 		{
-			template <class Type>
-			void operator()(Type * obj)
+			template <class ObjType>
+			void operator()(ObjType * obj)
 			{
 				pool->destroy(obj);
 			}
@@ -64,19 +64,19 @@ namespace smp
 			_deallocate(_memorypool_address, _memorypool_size);
 		}
 		
-		template <class Type, class ... ArgTypes>
-		Type * construct(ArgTypes && ... args)
+		template <class ObjType, class ... ArgTypes>
+		ObjType * construct(ArgTypes && ... args)
 		{
 			for (auto block = std::begin(_memorypool_blocks), end_block = std::end(_memorypool_blocks); block != end_block; ++block)
 			{
-				if (auto padding = (alignof(Type) - uintptr_t(block->first) % alignof(Type)) % alignof(Type);
-					block->second - padding >= sizeof(Type))
+				if (auto padding = (alignof(ObjType) - (uintptr_t(block->first) % alignof(ObjType))) % alignof(ObjType);
+					block->second - padding >= sizeof(ObjType))
 				{
 					auto address = block->first + padding;
 
-					if (auto size = block->second - padding - sizeof(Type))
+					if (auto size = block->second - padding - sizeof(ObjType))
 					{
-						_memorypool_blocks.emplace_hint(std::next(block), address + sizeof(Type), size);
+						_memorypool_blocks.emplace_hint(std::next(block), address + sizeof(ObjType), size);
 					}
 
 					if (padding)
@@ -88,29 +88,29 @@ namespace smp
 						_memorypool_blocks.erase(block);
 					}
 
-					return new (address) Type{ std::forward<ArgTypes>(args) ... };
+					return new (address) ObjType{ std::forward<ArgTypes>(args) ... };
 				}
 			}
 
 			return nullptr;
 		}
-		template <class Type, class ... ArgTypes>
-		std::unique_ptr<Type, deleter_type> construct_unique(ArgTypes && ... args)
+		template <class ObjType, class ... ArgTypes>
+		std::unique_ptr<ObjType, deleter_type> construct_unique(ArgTypes && ... args)
 		{
-			return std::unique_ptr<Type, deleter_type>(construct<Type>(std::forward<ArgTypes>(args) ...), deleter_type{ this });
+			return std::unique_ptr<ObjType, deleter_type>(construct<ObjType>(std::forward<ArgTypes>(args) ...), deleter_type{ this });
 		}
-		template <class Type, class ... ArgTypes>
-		std::shared_ptr<Type> construct_shared(ArgTypes && ... args)
+		template <class ObjType, class ... ArgTypes>
+		std::shared_ptr<ObjType> construct_shared(ArgTypes && ... args)
 		{
-			return std::shared_ptr<Type>(construct<Type>(std::forward<ArgTypes>(args) ...), deleter_type{ this });
+			return std::shared_ptr<ObjType>(construct<ObjType>(std::forward<ArgTypes>(args) ...), deleter_type{ this });
 		}
-		template <class Type>
-		void destroy(Type * obj)
+		template <class ObjType>
+		void destroy(ObjType * obj)
 		{
-			if (auto address = reinterpret_cast<std::byte *>(obj); 
+			if (auto address = reinterpret_cast<std::byte *>(obj);
 				_memorypool_address <= address && address < _memorypool_address + _memorypool_size)
 			{
-				auto block = _memorypool_blocks.emplace(address, sizeof(Type)).first;
+				auto block = _memorypool_blocks.emplace(address, sizeof(ObjType)).first;
 				auto prev_block = block != std::begin(_memorypool_blocks) ? std::prev(block) : block;
 				auto next_block = std::next(block);
 
@@ -130,9 +130,9 @@ namespace smp
 					_memorypool_blocks.erase(next_block);
 				}
 					
-				if constexpr (std::is_class_v<Type>)
+				if constexpr (std::is_class_v<ObjType>)
 				{
-					obj->~Type();
+					obj->~ObjType();
 				}
 			}
 		}
@@ -150,7 +150,7 @@ namespace smp
 		}
 		constexpr void _deallocate(std::byte * address, size_t size)
 		{
-			if constexpr (Alignment > alignof(std::max_align_t))
+			if constexpr (Alignment > alignof(max_align_t))
 			{
 				operator delete(address, size, std::align_val_t(Alignment));
 			}
