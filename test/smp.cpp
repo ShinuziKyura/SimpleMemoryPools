@@ -2,20 +2,20 @@
 
 #include "..\lib\smp.hpp"
 
+using namespace smp::literals;
+
 struct S
 {
 	int i = 0;
 };
 
+static smp::memorypool mp(64_B); // Parameter may be omitted, must ensure memorypool is the last object to be destroyed
+
 int main()
 {
-	using namespace smp::literals;
-	
-	smp::memorypool	mp(64_B); // Parameter may be omitted
-	
-	S * a = mp.construct<S>(1);
-	std::unique_ptr<S, smp::memorypool<>::deleter_type> b = mp.construct_unique<S>(2);
-	std::shared_ptr<S> c = mp.construct_shared<S>(3);
+	auto a = mp.construct<S>(1);
+	auto b = mp.construct_unique<S>(2);
+	auto c = mp.construct_shared<S>(3);
 	
 	{
 		auto d = c;
@@ -23,6 +23,7 @@ int main()
 		std::cout << d->i;
 		d->i = 3;
 	}
+
 	std::cout << c->i;
 	std::cout << b->i;
 	std::cout << a->i;

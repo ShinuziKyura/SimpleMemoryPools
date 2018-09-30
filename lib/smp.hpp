@@ -4,7 +4,7 @@
 #include <memory>
 #include <map>
 
-// SimpleMemoryPools - version A.1.3.0
+// SimpleMemoryPools - version A.1.3.1
 namespace smp
 {
 	namespace literals
@@ -47,59 +47,45 @@ namespace smp
 		using deleter_type = _smart_ptr_deleter_t<Alignment>;
 
 		memorypool(size_t size) :
-			_memorypool_pools{ {static_cast<std::byte *>(Alignment > alignof(max_align_t)
-														? operator new(size, std::align_val_t(Alignment))
-														: operator new(size)),
-							   size} },
-			_memorypool_chunks(_memorypool_pools)
+			_memorypool_address(_allocate(size)),
+			_memorypool_size(size),
+			_memorypool_blocks({ std::make_pair(_memorypool_address, _memorypool_size) })
 		{
 		}
 		memorypool(memorypool && other) :
-			_memorypool_pools(std::move(other._memorypool_pools)),
-			_memorypool_chunks(std::move(other._memorypool_chunks))
+			_memorypool_address(other._memorypool_address),
+			_memorypool_size(other._memorypool_size),
+			_memorypool_blocks(std::move(other._memorypool_blocks))
 		{
 		}
 		memorypool & operator=(memorypool &&) = delete;
 		~memorypool()
 		{
-			if constexpr (Alignment > alignof(std::max_align_t))
-			{
-				for (auto & pool : _memorypool_pools)
-				{
-					operator delete(pool.first, pool.second, std::align_val_t(Alignment));
-				}
-			}
-			else
-			{
-				for (auto & pool : _memorypool_pools)
-				{
-					operator delete(pool.first, pool.second);
-				}
-			}
+			_deallocate();
 		}
 		
 		template <class Type, class ... ArgTypes>
 		Type * construct(ArgTypes && ... args)
 		{
-			for (auto chunk = std::begin(_memorypool_chunks), end_chunk = std::end(_memorypool_chunks); chunk != end_chunk; ++chunk)
+			for (auto block = std::begin(_memorypool_blocks), end_block = std::end(_memorypool_blocks); block != end_block; ++block)
 			{
-				if (auto padding = (alignof(Type) - uintptr_t(chunk->first) % alignof(Type)) % alignof(Type);
-					chunk->second - padding >= sizeof(Type))
+				if (auto padding = (alignof(Type) - uintptr_t(block->first) % alignof(Type)) % alignof(Type);
+					block->second - padding >= sizeof(Type))
 				{
-					auto address = chunk->first + padding;
+					auto address = block->first + padding;
 
-					if (auto size = chunk->second - padding - sizeof(Type))
+					if (auto size = block->second - padding - sizeof(Type))
 					{
-						_memorypool_chunks.emplace_hint(std::next(chunk), address + sizeof(Type), size);
+						_memorypool_blocks.emplace_hint(std::next(block), address + sizeof(Type), size);
 					}
 
 					if (padding)
 					{
-						chunk->second = padding;
+						block->second = padding;
 					}
 					else
 					{
-						_memorypool_chunks.erase(chunk);
+						_memorypool_blocks.erase(block);
 					}
 
 					return new (address) Type{ std::forward<ArgTypes>(args) ... };
@@ -121,43 +107,62 @@ namespace smp
 		template <class Type>
 		void destroy(Type * obj)
 		{
-			for (auto & pool : _memorypool_pools)
+			if (auto address = reinterpret_cast<std::byte *>(obj); 
+				_memorypool_address <= address && address < _memorypool_address + _memorypool_size)
 			{
-				if (auto address = reinterpret_cast<std::byte *>(obj); 
-					pool.first <= address && address < pool.first + pool.second)
+				auto block = _memorypool_blocks.emplace(address, sizeof(Type)).first;
+				auto prev_block = block != std::begin(_memorypool_blocks) ? std::prev(block) : block;
+				auto next_block = std::next(block);
+
+				if (prev_block->first + prev_block->second == block->first)
 				{
-					auto chunk = _memorypool_chunks.emplace(address, sizeof(Type)).first;
-					auto prev_chunk = chunk != std::begin(_memorypool_chunks) ? std::prev(chunk) : chunk;
-					auto next_chunk = std::next(chunk);
+					prev_block->second += block->second;
 
-					if (prev_chunk->first + prev_chunk->second == chunk->first)
-					{
-						prev_chunk->second += chunk->second;
+					_memorypool_blocks.erase(block);
 
-						_memorypool_chunks.erase(chunk);
+					block = prev_block;
+				}
 
-						chunk = prev_chunk;
-					}
+				if (next_block != std::end(_memorypool_blocks) && block->first + block->second == next_block->first)
+				{
+					block->second += next_block->second;
 
-					if (next_chunk != std::end(_memorypool_chunks) && chunk->first + chunk->second == next_chunk->first)
-					{
-						chunk->second += next_chunk->second;
-
-						_memorypool_chunks.erase(next_chunk);
-					}
+					_memorypool_blocks.erase(next_block);
+				}
 					
-					if constexpr (std::is_class_v<Type>)
-					{
-						obj->~Type();
-					}
-
-					return;
+				if constexpr (std::is_class_v<Type>)
+				{
+					obj->~Type();
 				}
 			}
 		}
 	private:
-		std::map<std::byte *, size_t> _memorypool_pools;
-		std::map<std::byte *, size_t> _memorypool_chunks;
+		constexpr std::byte * _allocate(size_t size)
+		{
+			if constexpr (Alignment > alignof(max_align_t))
+			{
+				return static_cast<std::byte *>(operator new(size, std::align_val_t(Alignment)));
+			}
+			else
+			{
+				return static_cast<std::byte *>(operator new(size));
+			}
+		}
+		constexpr void _deallocate()
+		{
+			if constexpr (Alignment > alignof(std::max_align_t))
+			{
+				operator delete(_memorypool_address, _memorypool_size, std::align_val_t(Alignment));
+			}
+			else
+			{
+				operator delete(_memorypool_address, _memorypool_size);
+			}
+		}
+
+		std::byte * const _memorypool_address;
+		size_t const _memorypool_size;
+		std::map<std::byte *, size_t> _memorypool_blocks;
 	};
 }
 
