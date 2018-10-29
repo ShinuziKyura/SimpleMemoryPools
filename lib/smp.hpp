@@ -4,7 +4,7 @@
 #include <memory>
 #include <map>
 
-// SimpleMemoryPools - version A.1.3.3
+// SimpleMemoryPools - version A.1.4.0
 namespace smp
 {
 	namespace literals
@@ -27,43 +27,26 @@ namespace smp
 		}
 	}
 
-	template <size_t Alignment = alignof(max_align_t)>
-	class memorypool
+	class memorypool_delete;
+
+	class _memorypool
 	{
-		static_assert((Alignment & (Alignment - 1)) == 0, "Alignment must be a power of two");
-
-		template <size_t Alignment>
-		struct _smart_ptr_deleter_t
-		{
-			template <class ObjType>
-			void operator()(ObjType * obj)
-			{
-				pool->destruct(obj);
-			}
-
-			memorypool<Alignment> * pool;
-		};
-	public:
-		using deleter_type = _smart_ptr_deleter_t<Alignment>;
-
-		memorypool(size_t size) :
-			_memorypool_address(_allocate(size)),
+	protected:
+		_memorypool(std::byte * address, size_t size) :
+			_memorypool_address(address),
 			_memorypool_size(size),
-			_memorypool_blocks({ std::make_pair(_memorypool_address, _memorypool_size) })
+			_memorypool_blocks({ std::make_pair(address, size) })
 		{
 		}
-		memorypool(memorypool && other) :
+		_memorypool(_memorypool && other) :
 			_memorypool_address(other._memorypool_address),
 			_memorypool_size(other._memorypool_size),
 			_memorypool_blocks(std::move(other._memorypool_blocks))
 		{
 		}
-		memorypool & operator=(memorypool &&) = delete;
-		~memorypool()
-		{
-			_deallocate(_memorypool_address, _memorypool_size);
-		}
-		
+		_memorypool & operator=(_memorypool &&) = delete;
+		~_memorypool() = default;
+	public:
 		template <class ObjType, class ... ArgTypes>
 		ObjType * construct(ArgTypes && ... args)
 		{
@@ -95,14 +78,14 @@ namespace smp
 			return nullptr;
 		}
 		template <class ObjType, class ... ArgTypes>
-		std::unique_ptr<ObjType, deleter_type> construct_unique(ArgTypes && ... args)
+		std::unique_ptr<ObjType, memorypool_delete> construct_unique(ArgTypes && ... args)
 		{
-			return std::unique_ptr<ObjType, deleter_type>(construct<ObjType>(std::forward<ArgTypes>(args) ...), deleter_type{ this });
+			return std::unique_ptr<ObjType, memorypool_delete>(construct<ObjType>(std::forward<ArgTypes>(args) ...), memorypool_delete(this));
 		}
 		template <class ObjType, class ... ArgTypes>
 		std::shared_ptr<ObjType> construct_shared(ArgTypes && ... args)
 		{
-			return std::shared_ptr<ObjType>(construct<ObjType>(std::forward<ArgTypes>(args) ...), deleter_type{ this });
+			return std::shared_ptr<ObjType>(construct<ObjType>(std::forward<ArgTypes>(args) ...), memorypool_delete(this));
 		}
 		template <class ObjType>
 		void destruct(ObjType * obj)
@@ -129,15 +112,39 @@ namespace smp
 
 					_memorypool_blocks.erase(next_block);
 				}
-					
+
 				if constexpr (std::is_class_v<ObjType>)
 				{
 					obj->~ObjType();
 				}
 			}
 		}
+	protected:
+		std::byte * const _memorypool_address;
+		size_t const _memorypool_size;
+		std::map<std::byte *, size_t> _memorypool_blocks;
+	};
+
+	template <size_t Alignment = alignof(max_align_t)>
+	class memorypool : public _memorypool
+	{
+		static_assert((Alignment & (Alignment - 1)) == 0, "Alignment must be a power of two");
+	public:
+		memorypool(size_t size) :
+			_memorypool(_allocate(size), size)
+		{
+		}
+		memorypool(memorypool && other) :
+			_memorypool(static_cast<_memorypool &&>(other))
+		{
+		}
+		memorypool & operator=(memorypool &&) = delete;
+		~memorypool()
+		{
+			_deallocate(_memorypool_address, _memorypool_size);
+		}
 	private:
-		constexpr std::byte * _allocate(size_t size)
+		static std::byte * _allocate(size_t size)
 		{
 			if constexpr (Alignment > alignof(max_align_t))
 			{
@@ -148,7 +155,7 @@ namespace smp
 				return static_cast<std::byte *>(operator new(size));
 			}
 		}
-		constexpr void _deallocate(std::byte * address, size_t size)
+		static void _deallocate(std::byte * address, size_t size)
 		{
 			if constexpr (Alignment > alignof(max_align_t))
 			{
@@ -159,10 +166,31 @@ namespace smp
 				operator delete(address, size);
 			}
 		}
+	};
 
-		std::byte * const _memorypool_address;
-		size_t const _memorypool_size;
-		std::map<std::byte *, size_t> _memorypool_blocks;
+	class memorypool_delete
+	{
+	private:
+		memorypool_delete(_memorypool * pool) :
+			_pool(pool)
+		{
+		}
+	public:
+		template <size_t Alignment>
+		memorypool_delete(memorypool<Alignment> * pool) :
+			memorypool_delete(static_cast<_memorypool *>(pool))
+		{
+		}
+
+		template <class ObjType>
+		void operator()(ObjType * obj)
+		{
+			_pool->destruct(obj);
+		}
+	private:
+		_memorypool * _pool;
+
+		friend class _memorypool;
 	};
 }
 
