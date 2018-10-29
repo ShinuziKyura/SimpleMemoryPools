@@ -4,7 +4,7 @@
 #include <memory>
 #include <map>
 
-// SimpleMemoryPools - version A.1.3.2
+// SimpleMemoryPools - version A.1.3.3
 namespace smp
 {
 	namespace literals
@@ -38,7 +38,7 @@ namespace smp
 			template <class ObjType>
 			void operator()(ObjType * obj)
 			{
-				pool->destroy(obj);
+				pool->destruct(obj);
 			}
 
 			memorypool<Alignment> * pool;
@@ -105,7 +105,7 @@ namespace smp
 			return std::shared_ptr<ObjType>(construct<ObjType>(std::forward<ArgTypes>(args) ...), deleter_type{ this });
 		}
 		template <class ObjType>
-		void destroy(ObjType * obj)
+		void destruct(ObjType * obj)
 		{
 			if (auto address = reinterpret_cast<std::byte *>(obj);
 				_memorypool_address <= address && address < _memorypool_address + _memorypool_size)

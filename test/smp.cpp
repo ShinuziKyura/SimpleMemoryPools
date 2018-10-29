@@ -28,9 +28,9 @@ int main()
 	std::cout << b->i;
 	std::cout << a->i;
 	
-	mp.destroy(a);
-//	mp.destroy(b); // We don't need to destroy b or c, the custom deleter takes care of that for us
-//	mp.destroy(c);
+	mp.destruct(a);
+//	mp.destruct(b); // We don't need to destruct b or c, the custom deleter takes care of that for us
+//	mp.destruct(c);
 
 	std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
