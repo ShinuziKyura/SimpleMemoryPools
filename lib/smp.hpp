@@ -4,7 +4,7 @@
 #include <memory>
 #include <map>
 
-// SimpleMemoryPools - version A.1.4.1
+// SimpleMemoryPools - version A.1.4.0
 namespace smp
 {
 	namespace literals
@@ -113,7 +113,7 @@ namespace smp
 					_memorypool_blocks.erase(next_block);
 				}
 
-				if constexpr (std::is_standard_layout_v<ObjType> ? !std::is_trivially_destructible_v<ObjType> : std::is_class_v<ObjType>)
+				if constexpr (std::is_class_v<ObjType>)
 				{
 					obj->~ObjType();
 				}
